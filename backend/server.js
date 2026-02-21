@@ -2,7 +2,20 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
+
+// Manually load .env file
+const envPath = path.resolve(process.cwd(), '.env');
+if (fs.existsSync(envPath)) {
+  const envConfig = fs.readFileSync(envPath, 'utf8');
+  envConfig.split('\n').forEach(line => {
+    const [key, value] = line.split('=');
+    if (key && value) {
+      process.env[key.trim()] = value.trim();
+    }
+  });
+}
 
 // Config
 import lndConfig from './config/lnd-config.js';
@@ -14,9 +27,12 @@ import InvoiceGenerator from './invoice-generator.js';
 import DonationTracker from './donation-tracker.js';
 import ProofManager from './proof-manager.js';
 import StatusMonitor from './status-monitor.js';
+import AIService from './ai-service.js';
+import ConverterService from './converter-service.js';
 
 // Routes
 import createApiRoutes from './routes/api.js';
+import createAIRoutes from './routes/ai.js';
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -40,6 +56,8 @@ const donationTracker = new DonationTracker(serverConfig.dataFilePath);
 const invoiceGenerator = new InvoiceGenerator(lightningClient);
 const proofManager = new ProofManager(donationTracker);
 const statusMonitor = new StatusMonitor(lightningClient, donationTracker, proofManager);
+const aiService = new AIService(process.env.GEMINI_API_KEY);
+const converterService = new ConverterService();
 
 // Connect to LND
 (async () => {
@@ -51,13 +69,13 @@ const statusMonitor = new StatusMonitor(lightningClient, donationTracker, proofM
     const nodeInfo = await lightningClient.getNodeInfo();
     console.log(`Connected to LND node: ${nodeInfo.alias} (${nodeInfo.publicKey})`);
   } catch (err) {
-    console.error('Failed to connect to LND:', err.message);
-    console.error('Stack:', err.stack);
+    console.warn('Failed to connect to LND (skipping connection for AI tests):', err.message);
   }
 })();
 
 // Mount API routes
 app.use('/api', createApiRoutes(invoiceGenerator, statusMonitor, lightningClient, donationTracker));
+app.use('/api/ai', createAIRoutes(aiService, converterService));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -91,4 +109,3 @@ process.on('SIGTERM', async () => {
   donationTracker.saveToDisk();
   process.exit(0);
 });
-
